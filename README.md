@@ -1,3 +1,4 @@
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -5,7 +6,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <string.h>
-
+#include <dirent.h>
+#include <errno.h>
 void displayRegularFileInfo(const char* path) {
     struct stat st;
     if (lstat(path, &st) == -1) {
@@ -132,7 +134,8 @@ printf("Processing file: %s\n", argv[i]);
 break;
 }
 }
-} else if (S_ISLNK(st.st_mode)) {
+} 
+else if (S_ISLNK(st.st_mode)) {
 //displaySymbolicLinkInfo(argv[i]);
 printf("Interactive menu:\n");
 printf("-n: Display link name\n");
@@ -288,3 +291,129 @@ else if (S_ISDIR(st.st_mode)) {
 
 return 0;
 }
+
+void handleRegularFile(char* filename) {
+    int isCFile = 0;
+    int len = strlen(filename);
+    if (len > 2 && filename[len - 2] == '.' && filename[len - 1] == 'c') {
+        isCFile = 1;
+    }
+
+    if (isCFile) {
+        // Create a pipe for communication with the child process
+        int pipefd[2];
+        if (pipe(pipefd) == -1) {
+            perror("pipe");
+            return;
+        }
+
+        // Fork a child process to execute the script and write to the pipe
+        pid_t pid = fork();
+        if (pid == -1) {
+            perror("fork");
+            return;
+        } else if (pid == 0) {
+            // Child process: execute the script and write to the pipe
+            close(pipefd[0]);
+            dup2(pipefd[1], STDOUT_FILENO);
+            execlp("sh", "sh", "-c", "gcc -o /dev/null -Wall -Wextra -pedantic -Werror -Wno-unused-variable -Wno-unused-parameter -Wno-unused-function ", filename, NULL);
+            perror("execlp");
+            exit(EXIT_FAILURE);
+        } else {
+            // Parent process: read from the pipe and compute the score
+            close(pipefd[1]);
+
+            // Read the output from the child process
+            char buffer[1024];
+            ssize_t bytesRead = read(pipefd[0], buffer, sizeof(buffer) - 1);
+            if (bytesRead == -1) {
+                perror("read");
+                return;
+            }
+            buffer[bytesRead] = '\0';
+
+            // Count the number of errors and warnings
+            int numErrors = 0, numWarnings = 0;
+            char* ptr = buffer;
+            while ((ptr = strstr(ptr, "error:")) != NULL) {
+                numErrors++;
+                ptr++;
+            }
+            ptr = buffer;
+            while ((ptr = strstr(ptr, "warning:")) != NULL) {
+                numWarnings++;
+                ptr++;
+            }
+
+            // Compute the score
+            int score;
+            if (numErrors == 0 && numWarnings == 0) {
+                score = 10;
+            } else if (numErrors >= 1) {
+                score = 1;
+            } else if (numWarnings > 10) {
+                score = 2;
+            } else {
+                score = 2 + 8 * (10 - numWarnings) / 10;
+            }
+
+            // Write the score to the grades.txt file
+            char gradeFilename[256];
+            snprintf(gradeFilename, sizeof(gradeFilename), "%s.txt", filename);
+            FILE* fp = fopen("grades.txt", "a");
+            if (fp == NULL) {
+                perror("fopen");
+                return;
+            }
+            fprintf(fp, "%s: %d\n", gradeFilename, score);
+            fclose(fp);
+            printf("- Score for file %s: %d\n", filename, score);
+
+            // Close the pipe and wait for the child process to terminate
+            close(pipefd[0]);
+            int status;
+            waitpid(pid, &status, 0);
+            printf("The process with PID %d has ended with the exit code %d\n", pid, WEXITSTATUS(status));
+        }
+    } 
+    void handleDirectory(char* dirname) {
+    DIR* dir = opendir(dirname);
+    if (dir == NULL) {
+        perror("opendir");
+        return;
+    }
+
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL) {
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/%s", dirname, entry->d_name);
+
+        struct stat st;
+        if (lstat(path, &st) == -1) {
+            perror("lstat");
+            continue;
+        }
+
+        if (S_ISREG(st.st_mode)) {
+            handleRegularFile(path);
+        } else if (S_ISDIR(st.st_mode) && strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) {
+            handleDirectory(path);
+        }
+    }
+
+    closedir(dir);
+}
+
+int main(int argc, char* argv[]) {
+    if (argc != 2) {
+        printf("Usage: %s directory\n", argv[0]);
+        return 1;
+    }
+
+    char* dirname = argv[1];
+    handleDirectory(dirname);
+
+    return 0;
+}
+
+        
