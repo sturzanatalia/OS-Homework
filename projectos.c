@@ -313,16 +313,6 @@ void print_file_info(const char *path) {
         return;
     }
 
-    if(S_ISLNK(st.st_mode)) {
-        ret = lstat(path, &st);
-        if(ret != 0) {
-            perror("lstat");
-            return;
-        }
-        printf("The file is a symbolic link.\n");
-    } else {
-        printf("The file is not a symbolic link.\n");
-    }
 
     printf("Information for %s:\n", path);
     printf("---------------------------\n");
