@@ -150,11 +150,7 @@ void handle_regular_file(const char *path) {
 
             printf("The file %s contains %d lines.\n", path, lines);
         }
-        int status;
-        waitpid(pid, &status, 0);
-        if(WIFEXITED(status)) {
-            printf("The process with PID %d has ended with the exit code %d\n", pid, WEXITSTATUS(status));
-        }
+       
     }
 }
 
